@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exercice d'attention et de temps de réaction</title>
+<style>
+  :root{
+    --bg:#0e1218;
+    --panel:#182029;
+    --panel-2:#212c38;
+    --line:#33414f;
+    --txt:#e9eef4;
+    --txt-dim:#96a5b5;
+    --accent:#06d6a0;
+    --accent-2:#4cc9f0;
+    --warn:#e63946;
+    --ok:#06d6a0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--txt);
+    font:16px/1.5 "Segoe UI",system-ui,sans-serif;
+    overflow:hidden; user-select:none;
+  }
+  .screen{position:fixed; inset:0; display:flex; overflow:auto}
+  .screen.hidden{display:none}
+
+  /* ---------- Menu ---------- */
+  #menu{align-items:flex-start; justify-content:center; padding:28px 20px}
+  .card{
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:24px 26px; width:100%; max-width:940px;
+  }
+  h1{font-size:26px; font-weight:650; letter-spacing:-.3px}
+  h1 small{display:block; font-size:14px; font-weight:400; color:var(--txt-dim); margin-top:4px}
+  h2{font-size:14px; text-transform:uppercase; letter-spacing:1.2px;
+     color:var(--txt-dim); margin:22px 0 12px; font-weight:600}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px}
+  label.field{display:flex; flex-direction:column; gap:6px; font-size:14px; color:var(--txt-dim)}
+  label.field span{font-weight:600; color:var(--txt)}
+  label.field em{font-style:normal; font-size:12.5px; color:var(--txt-dim); line-height:1.35}
+  input[type=number],select{
+    background:var(--panel-2); color:var(--txt); border:1px solid var(--line);
+    border-radius:8px; padding:11px 12px; font-size:17px; font-family:inherit; width:100%;
+  }
+  input[type=number]:focus,select:focus{outline:2px solid var(--accent-2); outline-offset:1px}
+
+  .modes{display:flex; gap:12px; flex-wrap:wrap}
+  .modes label{
+    flex:1 1 260px; background:var(--panel-2); border:2px solid var(--line);
+    border-radius:10px; padding:14px 16px; cursor:pointer; display:flex; gap:12px; align-items:flex-start;
+  }
+  .modes label:has(input:checked){border-color:var(--accent); background:#16302c}
+  .modes input{margin-top:3px; accent-color:var(--accent); width:18px; height:18px}
+  .modes b{display:block; font-size:16px}
+  .modes em{font-style:normal; font-size:13px; color:var(--txt-dim)}
+
+  .btn{
+    background:var(--accent); color:#04241c; border:0; border-radius:10px;
+    padding:15px 30px; font-size:18px; font-weight:700; font-family:inherit; cursor:pointer;
+  }
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent; color:var(--txt); border:1px solid var(--line); font-weight:600}
+  .actions{display:flex; gap:12px; align-items:center; margin-top:26px; flex-wrap:wrap}
+
+  /* ---------- Diagnostic joystick ---------- */
+  #diag{background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:16px}
+  #padName{font-weight:600; margin-bottom:12px}
+  #padName.off{color:#f4a261}
+  .axes{display:grid; grid-template-columns:auto 1fr auto; gap:8px 12px; align-items:center; font-size:14px}
+  .bar{position:relative; height:16px; background:#0e141b; border-radius:8px; overflow:hidden}
+  .bar i{position:absolute; top:0; bottom:0; left:50%; background:var(--accent-2); display:block}
+  .bar u{position:absolute; top:0; bottom:0; left:50%; width:1px; background:#4a5a6b}
+  .val{font-variant-numeric:tabular-nums; color:var(--txt-dim); min-width:56px; text-align:right}
+  .hint{font-size:13px; color:var(--txt-dim); margin-top:12px; line-height:1.45}
+
+  /* ---------- Jeu ---------- */
+  #game{background:#000; align-items:center; justify-content:center; cursor:none}
+  canvas{display:block}
+
+  /* ---------- Résultats ---------- */
+  #results{align-items:flex-start; justify-content:center; padding:28px 20px}
+  .stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px}
+  .stat{background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:16px 18px}
+  .stat .k{font-size:12.5px; text-transform:uppercase; letter-spacing:.9px; color:var(--txt-dim)}
+  .stat .v{font-size:30px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums}
+  .stat .s{font-size:13px; color:var(--txt-dim); margin-top:2px}
+  .stat.good .v{color:var(--ok)}
+  .stat.bad .v{color:var(--warn)}
+  .stat.info .v{color:var(--accent-2)}
+  table.recap{width:100%; border-collapse:collapse; font-size:15px; margin-top:4px}
+  table.recap td{padding:9px 4px; border-bottom:1px solid var(--line)}
+  table.recap td:first-child{color:var(--txt-dim); width:52%}
+  table.recap td:last-child{text-align:right; font-weight:600; font-variant-numeric:tabular-nums}
+  .note{font-size:13px; color:var(--txt-dim); margin-top:14px; line-height:1.5;
+        border-left:3px solid var(--line); padding-left:12px}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════ MENU ══════════════════════════ -->
+<section id="menu" class="screen">
+  <div class="card">
+    <h1>Exercice d'attention — parcours d'obstacles
+      <small>Prototype · manette ou clavier · sensible à l'amplitude du joystick</small>
+    </h1>
+
+    <h2>Mode de déplacement</h2>
+    <div class="modes">
+      <label>
+        <input type="radio" name="mode" value="auto" checked>
+        <div><b>Défilement automatique</b>
+          <em>Le décor défile seul. Commandes : gauche / droite uniquement.<br>Mesure du temps de réaction active.</em></div>
+      </label>
+      <label>
+        <input type="radio" name="mode" value="manuel">
+        <div><b>Déplacement manuel</b>
+          <em>On avance en poussant le joystick vers l'avant.<br>Haut, gauche, droite et diagonales.</em></div>
+      </label>
+    </div>
+
+    <h2>Paramètres</h2>
+    <div class="grid">
+      <label class="field" id="f-vstart">
+        <span id="l-vstart">Vitesse de défilement au début</span>
+        <input type="number" id="vStart" value="180" min="40" max="900" step="10">
+        <em>pixels / seconde</em>
+      </label>
+      <label class="field" id="f-vend">
+        <span>Vitesse de défilement à la fin</span>
+        <input type="number" id="vEnd" value="340" min="40" max="900" step="10">
+        <em>Évolue progressivement du début à la fin</em>
+      </label>
+      <label class="field">
+        <span>Fréquence des obstacles</span>
+        <input type="number" id="freq" value="0.6" min="0.1" max="3" step="0.1">
+        <em id="l-freq">obstacles / seconde</em>
+      </label>
+      <label class="field">
+        <span>Durée de l'exercice</span>
+        <input type="number" id="duration" value="90" min="10" max="900" step="5">
+        <em>secondes</em>
+      </label>
+      <label class="field">
+        <span>Vitesse de déplacement latéral</span>
+        <input type="number" id="lateral" value="650" min="150" max="1600" step="50">
+        <em>pixels / seconde à pleine amplitude — réactivité de la commande</em>
+      </label>
+      <label class="field">
+        <span>Zone morte du joystick</span>
+        <input type="number" id="deadzone" value="15" min="0" max="60" step="1">
+        <em>% — au-delà duquel une action est comptée</em>
+      </label>
+    </div>
+
+    <h2>Joystick — diagnostic</h2>
+    <div id="diag">
+      <div id="padName" class="off">Aucune manette détectée</div>
+      <div class="axes">
+        <span>Axe X</span><div class="bar"><u></u><i id="barX"></i></div><span class="val" id="valX">0.00</span>
+        <span>Axe Y</span><div class="bar"><u></u><i id="barY"></i></div><span class="val" id="valY">0.00</span>
+      </div>
+      <div style="margin-top:12px;font-size:14px;color:var(--txt-dim)">
+        Fluidité mesurée sur ce PC : <b id="fps" style="color:var(--txt)">—</b> images/s
+      </div>
+      <p class="hint">
+        <b>Appuie sur un bouton du joystick</b> pour que le navigateur l'active (sécurité Chrome/Edge : une manette
+        reste invisible tant qu'aucun bouton n'a été pressé).<br>
+        Si les barres ne bougent pas alors que le joystick fonctionne ailleurs, c'est qu'il est vu comme une souris
+        et non comme une manette — dis-le moi, on ajoutera ce mode d'entrée.<br>
+        <b>Sans joystick</b> : flèches du clavier (amplitude fixée à 100 %) pour tester.
+      </p>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="btnStart">Démarrer l'exercice</button>
+      <button class="btn ghost" id="btnFs">Plein écran</button>
+      <span class="hint" style="margin:0">Entrée / bouton A du joystick pour démarrer · Échap pour arrêter en cours</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════ JEU ══════════════════════════ -->
+<section id="game" class="screen hidden"><canvas id="cv"></canvas></section>
+
+<!-- ══════════════════════════ RÉSULTATS ══════════════════════════ -->
+<section id="results" class="screen hidden">
+  <div class="card">
+    <h1>Récapitulatif de la partie <small id="resSub"></small></h1>
+
+    <h2>Obstacles</h2>
+    <div class="stats" id="statObst"></div>
+
+    <h2>Temps de réaction</h2>
+    <div class="stats" id="statRt"></div>
+
+    <h2>Paramètres de la partie</h2>
+    <table class="recap" id="tblInfo"></table>
+
+    <p class="note" id="resNote"></p>
+
+    <div class="actions">
+      <button class="btn" id="btnAgain">Refaire avec les mêmes réglages</button>
+      <button class="btn ghost" id="btnMenu">Retour aux réglages</button>
+    </div>
+  </div>
+</section>
+
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════════
+   CONSTANTES DE TERRAIN  (résolution logique fixe : la difficulté
+   ne dépend pas de la taille de l'écran)
+   ══════════════════════════════════════════════════════════════════ */
+const W = 1200, H = 900;              // résolution logique du canvas
+const WALL_W      = 44;               // épaisseur des murs
+const CORRIDOR_X  = 252;              // bord intérieur du mur gauche
+const CORRIDOR_W  = 696;              // largeur du couloir
+const CORRIDOR_R  = CORRIDOR_X + CORRIDOR_W;
+const PLAYER_W    = 74, PLAYER_H = 88;
+const PLAYER_Y    = 742;              // ordonnée du haut du personnage
+const OBST_SIZE   = 96;
+const THREAT_RATIO  = 0.75;           // part d'obstacles placés sur la trajectoire
+const MIN_SPAWN_GAP = OBST_SIZE * 1.7;// écart vertical minimal entre 2 obstacles
+/* Temps de réaction : variation de commande, dans le sens de l'esquive, considérée
+   comme « une action ». Mesurée par rapport à la commande tenue à l'apparition, pour
+   rester valable même si le joystick n'a pas été relâché. */
+const ACTION_DELTA  = 0.15;
+const ALREADY_AWAY  = 0.50;           // au-delà, on s'écartait déjà : rien à faire
+const PASS_MARGIN   = 26;             // jeu latéral minimal garanti pour passer
+/* Périodes des motifs défilants. Chacun doit utiliser SA période pour le modulo :
+   partager un décalage de période différente fait sauter le motif à chaque bouclage. */
+const FLOOR_PERIOD  = 120;
+const WALL_PERIOD   = 90;
+const BAND_H        = OBST_SIZE * 2.6;// hauteur de bande où les obstacles se gênent
+const COUNTDOWN     = 3;              // secondes de décompte avant le départ
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
+const lerp  = (a,b,t) => a + (b-a)*t;
+
+/* ══════════════════════════════════════════════════════════════════
+   ENTRÉES  (joystick + clavier)
+   ══════════════════════════════════════════════════════════════════ */
+const keys = Object.create(null);
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Escape' && state.phase === 'run') endGame('interrompu');
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+function firstPad(){
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const p of pads) if (p && p.connected && p.axes.length >= 2) return p;
+  return null;
+}
+
+/** Lit la manette ET le clavier, en parallèle : la commande la plus ample l'emporte.
+ *  (Un repli « clavier seulement si manette au neutre » rendrait les flèches muettes
+ *   dès que le stick dérive au-dessus de la zone morte.)
+ *  Zone morte radiale, puis réétalement sur [0,1] pour garder toute l'amplitude utile. */
+function readInput(dz){
+  let px = 0, py = 0, pMag = 0;
+  const pad = firstPad();
+
+  if (pad){
+    let ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
+    const b = pad.buttons;                      // croix directionnelle, amplitude maximale
+    if (b.length >= 16){
+      if (b[12]?.pressed) ay = -1;
+      if (b[13]?.pressed) ay =  1;
+      if (b[14]?.pressed) ax = -1;
+      if (b[15]?.pressed) ax =  1;
+    }
+    const raw = Math.hypot(ax, ay);
+    if (raw > dz){
+      const scaled = Math.min((raw - dz) / (1 - dz), 1);
+      px = ax / raw * scaled; py = ay / raw * scaled; pMag = raw;
+    }
+  }
+
+  let kx = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyQ || keys.KeyA ? 1 : 0);
+  let ky = (keys.ArrowDown  || keys.KeyS ? 1 : 0) - (keys.ArrowUp   || keys.KeyZ || keys.KeyW ? 1 : 0);
+  if (kx || ky){ const m = Math.hypot(kx, ky); kx /= m; ky /= m; }
+
+  const kMagN = Math.hypot(kx, ky), pMagN = Math.hypot(px, py);
+  if (kMagN > pMagN) return { x:kx, y:ky, rawMag:1,    source:'key' };
+  if (pMagN > 0)     return { x:px, y:py, rawMag:pMag, source:'pad' };
+  return { x:0, y:0, rawMag:0, source:'none' };
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   ÉTAT DE LA PARTIE
+   ══════════════════════════════════════════════════════════════════ */
+let state = { phase:'menu' };
+let cfg   = null;
+
+function buildConfig(){
+  return {
+    mode:      document.querySelector('input[name=mode]:checked').value,
+    vStart:    +$('vStart').value,
+    vEnd:      +$('vEnd').value,
+    freq:      +$('freq').value,
+    duration:  +$('duration').value,
+    lateral:   +$('lateral').value,
+    deadzone:  clamp(+$('deadzone').value, 0, 60) / 100,
+  };
+}
+
+function startGame(){
+  cfg = buildConfig();
+  state = {
+    phase:'run',
+    t0: performance.now(),
+    last: performance.now(),
+    elapsed: 0,             // temps de jeu écoulé (décompte exclu)
+    countdown: COUNTDOWN,
+    playerX: CORRIDOR_X + CORRIDOR_W/2,   // centre du personnage
+    scrollY: 0,             // décor parcouru, en px
+    speed: 0,
+    obstacles: [],
+    spawnAcc: 0,
+    nextId: 1,
+
+    avoided: 0, hit: 0, wallHits: 0,
+    reactions: [],          // temps de réaction valides (ms)
+    threatCount: 0,         // obstacles réellement sur la trajectoire
+    noReaction: 0,          // menaçants passés sans aucune action
+    rtNoActionNeeded: 0,    // menaçants pour lesquels on s'écartait déjà
+    releases: [],           // délais de retour au neutre après passage (ms)
+
+    latActive: false,       // une commande latérale est-elle en cours ?
+    onsetTime: 0,
+    pendingRelease: null,   // instant du passage d'obstacle en attente de relâchement
+    wallTouch: false,
+    flash: 0,
+    endReason: '',
+  };
+  show('game');
+  requestAnimationFrame(loop);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BOUCLE DE JEU
+   ══════════════════════════════════════════════════════════════════ */
+function loop(now){
+  if (state.phase !== 'run') return;
+  const dt = Math.min((now - state.last)/1000, 0.05);
+  state.last = now;
+
+  const inp = readInput(cfg.deadzone);
+
+  if (state.countdown > 0){
+    state.countdown -= dt;
+    draw(inp);
+    return requestAnimationFrame(loop);
+  }
+
+  state.elapsed += dt;
+  update(dt, inp, now);
+  draw(inp);
+
+  if (state.elapsed >= cfg.duration) return endGame('terminé');
+  requestAnimationFrame(loop);
+}
+
+function update(dt, inp, now){
+  const s = state;
+
+  /* — vitesse de défilement — */
+  if (cfg.mode === 'auto'){
+    s.speed = lerp(cfg.vStart, cfg.vEnd, clamp(s.elapsed / cfg.duration, 0, 1));
+  } else {
+    s.speed = clamp(-inp.y, 0, 1) * cfg.vStart;   // pousser vers l'avant = avancer
+  }
+  s.scrollY += s.speed * dt;
+
+  /* — déplacement latéral, proportionnel à l'amplitude — */
+  s.playerX += inp.x * cfg.lateral * dt;
+  const minX = CORRIDOR_X + PLAYER_W/2, maxX = CORRIDOR_R - PLAYER_W/2;
+  const touching = s.playerX < minX || s.playerX > maxX;
+  if (touching && !s.wallTouch) s.wallHits++;
+  s.wallTouch = touching;
+  s.playerX = clamp(s.playerX, minX, maxX);
+
+  /* — temps de réaction : première variation de commande vers l'esquive — */
+  for (const o of s.obstacles){
+    if (o.resolved || !o.threat || o.noActionNeeded || o.rt !== null) continue;
+    if ((inp.x - o.xAtSpawn) * o.away >= ACTION_DELTA) o.rt = now - o.spawnT;
+  }
+
+  /* — suivi du maintien / relâchement de la commande latérale — */
+  const latNow = Math.abs(inp.x) > 0 && inp.rawMag > cfg.deadzone;
+  if (latNow && !s.latActive) s.onsetTime = now;
+  if (!latNow && s.latActive && s.pendingRelease !== null){
+    s.releases.push(now - s.pendingRelease);      // retour au neutre mesuré
+    s.pendingRelease = null;
+  }
+  s.latActive = latNow;
+
+  /* — apparition des obstacles — */
+  //  auto   : cadencée par le temps  → nombre d'obstacles prévisible
+  //  manuel : cadencée par la distance → rien n'apparaît si on n'avance pas
+  if (cfg.mode === 'auto') s.spawnAcc += dt * cfg.freq;
+  else                     s.spawnAcc += (s.speed * dt) / (cfg.vStart / cfg.freq);
+  s.spawnAcc = Math.min(s.spawnAcc, 1.5);   // évite une rafale après une attente
+
+  if (s.spawnAcc >= 1){
+    const topMost = s.obstacles.reduce((m,o) => Math.min(m, o.y), Infinity);
+    if (topMost > -OBST_SIZE + MIN_SPAWN_GAP || !isFinite(topMost)){
+      s.spawnAcc -= 1;
+      spawnObstacle(now, inp);
+    }
+  }
+
+  /* — avancée, collisions, sorties — */
+  const pl = { x:s.playerX - PLAYER_W/2, y:PLAYER_Y, w:PLAYER_W, h:PLAYER_H };
+  for (const o of s.obstacles){
+    o.y += s.speed * dt;
+    if (!o.resolved &&
+        o.x < pl.x + pl.w && o.x + OBST_SIZE > pl.x &&
+        o.y < pl.y + pl.h && o.y + OBST_SIZE > pl.y){
+      o.resolved = true; o.hitFlag = true;
+      s.hit++; s.flash = 0.35;
+      resolveObstacle(o, now);
+    }
+    if (!o.resolved && o.y > pl.y + pl.h){
+      o.resolved = true;
+      s.avoided++;
+      resolveObstacle(o, now);
+    }
+  }
+  s.obstacles = s.obstacles.filter(o => o.y < H + OBST_SIZE);
+  if (s.flash > 0) s.flash = Math.max(0, s.flash - dt);
+}
+
+/** Vérifie qu'en ajoutant un carré en `cand`, il reste dans le couloir un passage
+ *  assez large pour le mobile, compte tenu des obstacles de la même bande. */
+function passageLibre(cand, bande){
+  const iv = bande.map(o => [o.x, o.x + OBST_SIZE]);
+  iv.push([cand, cand + OBST_SIZE]);
+  iv.sort((a,b) => a[0] - b[0]);
+  let curseur = CORRIDOR_X, max = 0;
+  for (const [a,b] of iv){
+    max = Math.max(max, a - curseur);
+    curseur = Math.max(curseur, b);
+  }
+  return Math.max(max, CORRIDOR_R - curseur) >= PLAYER_W + PASS_MARGIN;
+}
+
+function tirageX(s){
+  if (Math.random() < THREAT_RATIO){          // recouvre la position du personnage
+    const lo = Math.max(CORRIDOR_X, s.playerX + PLAYER_W/2 - OBST_SIZE);
+    const hi = Math.min(CORRIDOR_R - OBST_SIZE, s.playerX - PLAYER_W/2);
+    if (lo <= hi) return lerp(lo, hi, Math.random());
+    return clamp(s.playerX - OBST_SIZE/2, CORRIDOR_X, CORRIDOR_R - OBST_SIZE);
+  }
+  return CORRIDOR_X + Math.random() * (CORRIDOR_W - OBST_SIZE);
+}
+
+function spawnObstacle(now, inp){
+  const s = state;
+
+  // le couloir ne doit jamais être infranchissable : on retire jusqu'à trouver
+  // une position qui laisse un passage, sinon on renonce à cette apparition
+  const bande = s.obstacles.filter(o => !o.resolved && o.y < -OBST_SIZE + BAND_H);
+  let x = null;
+  for (let essai = 0; essai < 14; essai++){
+    const c = tirageX(s);
+    if (passageLibre(c, bande)) { x = c; break; }
+  }
+  if (x === null) return;
+  // menace réelle = recouvrement effectif avec le personnage à l'apparition
+  const real = x < s.playerX + PLAYER_W/2 && x + OBST_SIZE > s.playerX - PLAYER_W/2;
+
+  // sens de l'esquive ; à recouvrement centré, on part du côté le plus dégagé
+  const ocx = x + OBST_SIZE/2;
+  let away = ocx < s.playerX ? 1 : ocx > s.playerX ? -1 : 0;
+  if (!away) away = (s.playerX - CORRIDOR_X) < (CORRIDOR_R - s.playerX) ? 1 : -1;
+
+  // déjà franchement en train de s'écarter : aucune nouvelle action n'est attendue
+  const noActionNeeded = real && inp.x * away >= ALREADY_AWAY;
+
+  if (real) s.threatCount++;
+  if (noActionNeeded) s.rtNoActionNeeded++;
+
+  s.obstacles.push({
+    id: s.nextId++, x, y: -OBST_SIZE, spawnT: now,
+    threat: real, away, xAtSpawn: inp.x, noActionNeeded,
+    rt: null, resolved:false, hitFlag:false, passed:false,
+  });
+}
+
+/** Obstacle franchi (évité ou touché) : clôture la mesure de réaction
+ *  et arme la mesure de relâchement. */
+function resolveObstacle(o, now){
+  o.passed = true;
+  if (o.threat && !o.noActionNeeded && o.rt === null) state.noReaction++;
+  if (o.threat && o.rt !== null) state.reactions.push(o.rt);
+  if (state.latActive && state.pendingRelease === null) state.pendingRelease = now;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   RENDU
+   ══════════════════════════════════════════════════════════════════ */
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+function fitCanvas(){
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const sc = Math.max(Math.min(innerWidth / W, innerHeight / H), 0.05);  // jamais 0
+  cv.width  = Math.round(W * sc * dpr);
+  cv.height = Math.round(H * sc * dpr);
+  cv.style.width  = Math.round(W * sc) + 'px';
+  cv.style.height = Math.round(H * sc) + 'px';
+  ctx.setTransform(sc*dpr, 0, 0, sc*dpr, 0, 0);
+}
+addEventListener('resize', fitCanvas);
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+
+function draw(inp){
+  const s = state;
+  const shake = s.flash > 0 ? (Math.random()-0.5) * s.flash * 22 : 0;
+  ctx.save(); ctx.translate(shake, 0);
+
+  /* fond extérieur */
+  ctx.fillStyle = '#12161d'; ctx.fillRect(-40, 0, W+80, H);
+
+  /* sol du couloir + bandes défilantes */
+  ctx.fillStyle = '#e9ecf1'; ctx.fillRect(CORRIDOR_X, 0, CORRIDOR_W, H);
+  const offSol = s.scrollY % FLOOR_PERIOD;
+  ctx.fillStyle = '#d3d9e3';
+  for (let y = offSol - FLOOR_PERIOD; y < H; y += FLOOR_PERIOD)
+    ctx.fillRect(CORRIDOR_X, y, CORRIDOR_W, 14);
+
+  /* murs gauche et droit — décalage propre à leur période, sinon le motif saute */
+  const offMur = s.scrollY % WALL_PERIOD;
+  drawWall(CORRIDOR_X - WALL_W, offMur, 1);
+  drawWall(CORRIDOR_R, offMur, -1);
+
+  /* obstacles */
+  for (const o of s.obstacles){
+    ctx.fillStyle = o.hitFlag ? '#8d99ae' : '#e63946';
+    ctx.fillRect(o.x, o.y, OBST_SIZE, OBST_SIZE);
+    ctx.strokeStyle = o.hitFlag ? '#5c6678' : '#7d1620';
+    ctx.lineWidth = 6; ctx.strokeRect(o.x+3, o.y+3, OBST_SIZE-6, OBST_SIZE-6);
+    ctx.fillStyle = 'rgba(255,255,255,.16)';
+    ctx.fillRect(o.x+18, o.y+18, OBST_SIZE-36, OBST_SIZE-36);
+  }
+
+  drawPlayer(s.playerX, PLAYER_Y);
+  drawHud(inp);
+
+  if (s.flash > 0){
+    ctx.fillStyle = `rgba(230,57,70,${s.flash * 0.5})`;
+    ctx.fillRect(-40, 0, W+80, H);
+  }
+  if (s.countdown > 0) drawCountdown();
+  ctx.restore();
+}
+
+function drawWall(x, off, dir){
+  ctx.fillStyle = '#333c4d'; ctx.fillRect(x, 0, WALL_W, H);
+  ctx.fillStyle = '#8892a5';
+  for (let y = off - WALL_PERIOD; y < H; y += WALL_PERIOD)
+    ctx.fillRect(x + 10, y, WALL_W - 20, 5);
+  ctx.fillStyle = '#f4a261';                    // liseré intérieur, haute visibilité
+  ctx.fillRect(dir > 0 ? x + WALL_W - 7 : x, 0, 7, H);
+}
+
+function drawPlayer(cx, top){
+  const x = cx - PLAYER_W/2;
+  ctx.fillStyle = 'rgba(0,0,0,.22)';            // ombre portée
+  roundRect(x+5, top+7, PLAYER_W, PLAYER_H, 16); ctx.fill();
+  ctx.fillStyle = '#0b1a2b';                    // roues
+  ctx.fillRect(x - 9, top + 20, 12, PLAYER_H - 34);
+  ctx.fillRect(x + PLAYER_W - 3, top + 20, 12, PLAYER_H - 34);
+  ctx.fillStyle = '#1d3557';                    // châssis
+  roundRect(x, top, PLAYER_W, PLAYER_H, 16); ctx.fill();
+  ctx.fillStyle = '#06d6a0';                    // repère central, haute visibilité
+  ctx.beginPath(); ctx.arc(cx, top + PLAYER_H*0.44, 23, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#04241c';
+  ctx.beginPath(); ctx.arc(cx, top + PLAYER_H*0.30, 9, 0, Math.PI*2); ctx.fill();
+}
+
+function drawHud(inp){
+  const s = state;
+  ctx.textBaseline = 'top';
+
+  /* chrono, à droite */
+  const left = Math.max(0, cfg.duration - s.elapsed);
+  ctx.fillStyle = '#e9eef4'; ctx.font = '700 62px "Segoe UI",sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(Math.ceil(left), W - 105, 34);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 16px "Segoe UI",sans-serif';
+  ctx.fillText('SECONDES', W - 105, 108);
+
+  ctx.font = '700 34px "Segoe UI",sans-serif';
+  ctx.fillStyle = '#06d6a0'; ctx.fillText(s.avoided, W - 150, 168);
+  ctx.fillStyle = '#e63946'; ctx.fillText(s.hit,     W - 60,  168);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 14px "Segoe UI",sans-serif';
+  ctx.fillText('ÉVITÉS', W - 150, 210); ctx.fillText('TOUCHÉS', W - 60, 210);
+
+  /* amplitude de commande, à gauche : retour visuel direct sur le geste */
+  const bx = 60, by = 300, bw = 92, bh = 300;
+  ctx.fillStyle = '#1c232d'; roundRect(bx, by, bw, bh, 10); ctx.fill();
+  ctx.fillStyle = '#4cc9f0';
+  const amp = Math.min(Math.abs(inp.x), 1) * bh;
+  ctx.fillRect(bx + 6, by + bh - amp, bw - 12, amp);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 14px "Segoe UI",sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('AMPLITUDE', bx + bw/2, by + bh + 12);
+  ctx.fillStyle = inp.source === 'pad' ? '#06d6a0' : inp.source === 'key' ? '#f4a261' : '#54627a';
+  ctx.fillText(inp.source === 'pad' ? 'JOYSTICK' : inp.source === 'key' ? 'CLAVIER' : 'NEUTRE', bx + bw/2, by - 30);
+
+  ctx.fillStyle = '#54627a'; ctx.font = '500 15px "Segoe UI",sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Échap : arrêter', 26, H - 46);
+  ctx.textAlign = 'left';
+}
+
+function drawCountdown(){
+  ctx.fillStyle = 'rgba(10,14,20,.72)'; ctx.fillRect(-40, 0, W+80, H);
+  const n = Math.ceil(state.countdown);
+  ctx.fillStyle = '#06d6a0'; ctx.font = '700 200px "Segoe UI",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(n, W/2, H/2);
+  ctx.fillStyle = '#e9eef4'; ctx.font = '600 30px "Segoe UI",sans-serif';
+  ctx.fillText(cfg.mode === 'auto' ? 'Évite les carrés rouges — gauche / droite'
+                                   : 'Pousse vers l’avant pour avancer', W/2, H/2 + 150);
+  ctx.textBaseline = 'top';
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   FIN DE PARTIE ET RÉSULTATS
+   ══════════════════════════════════════════════════════════════════ */
+function endGame(reason){
+  state.phase = 'done';
+  state.endReason = reason;
+  renderResults();
+  show('results');
+}
+
+const fmtPct = (n,d) => d ? (n/d*100).toFixed(1).replace('.',',') + ' %' : '—';
+const fmtMs  = v => v == null ? '—' : Math.round(v) + ' ms';
+const mean   = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+
+function renderResults(){
+  const s = state, total = s.avoided + s.hit;
+
+  $('resSub').textContent =
+    `${cfg.mode === 'auto' ? 'Défilement automatique' : 'Déplacement manuel'} · ` +
+    `${s.elapsed.toFixed(1).replace('.',',')} s · ` +
+    (s.endReason === 'interrompu' ? 'arrêtée avant la fin' : 'menée à son terme');
+
+  card('statObst', [
+    ['Obstacles rencontrés', total, '', 'info'],
+    ['Évités', s.avoided, fmtPct(s.avoided, total), 'good'],
+    ['Touchés', s.hit, fmtPct(s.hit, total), 'bad'],
+    ['Contacts avec les murs', s.wallHits, '', ''],
+  ]);
+
+  const m = mean(s.reactions);
+  card('statRt', [
+    ['Temps de réaction moyen', fmtMs(m),
+     `sur ${s.reactions.length} obstacle${s.reactions.length>1?'s':''} mesuré${s.reactions.length>1?'s':''}`, 'info'],
+    ['Le plus rapide', fmtMs(s.reactions.length ? Math.min(...s.reactions) : null), '', ''],
+    ['Le plus lent',   fmtMs(s.reactions.length ? Math.max(...s.reactions) : null), '', ''],
+    ['Sans réaction', s.noReaction, `sur ${s.threatCount} obstacle${s.threatCount>1?'s':''} sur la trajectoire`, s.noReaction ? 'bad' : ''],
+    ['Retour au neutre', fmtMs(mean(s.releases)),
+     `après passage · ${s.releases.length} mesure${s.releases.length>1?'s':''}`, 'info'],
+  ]);
+
+  const rows = [
+    ['Mode de déplacement', cfg.mode === 'auto' ? 'Défilement automatique' : 'Déplacement manuel'],
+    ['Durée demandée', cfg.duration + ' s'],
+    ['Durée réelle', s.elapsed.toFixed(1).replace('.',',') + ' s'],
+  ];
+  if (cfg.mode === 'auto'){
+    rows.push(['Vitesse au début', cfg.vStart + ' px/s'],
+              ['Vitesse à la fin',  cfg.vEnd + ' px/s'],
+              ['Vitesse atteinte',  Math.round(s.speed) + ' px/s']);
+  } else {
+    rows.push(['Vitesse maximale d’avance', cfg.vStart + ' px/s'],
+              ['Distance parcourue', Math.round(s.scrollY) + ' px']);
+  }
+  rows.push(['Fréquence des obstacles', String(cfg.freq).replace('.',',') + ' /s'],
+            ['Vitesse latérale',        cfg.lateral + ' px/s'],
+            ['Zone morte du joystick',  Math.round(cfg.deadzone*100) + ' %'],
+            ['Fin de partie', s.endReason === 'interrompu' ? 'Interrompue (Échap)' : 'Durée atteinte']);
+  $('tblInfo').innerHTML = rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+
+  $('resNote').innerHTML =
+    `<b>Temps de réaction</b> : délai entre l'apparition d'un obstacle placé sur la trajectoire et la première
+     variation du joystick dans le sens de l'esquive. La mesure part de la commande tenue à l'apparition : elle
+     reste donc valable si le joystick n'a pas été relâché. Seuls sont exclus les obstacles pour lesquels on
+     s'écartait déjà franchement (${s.rtNoActionNeeded} cas), aucune action n'étant alors attendue.<br>
+     <b>Retour au neutre</b> : temps mis pour relâcher le joystick une fois l'obstacle franchi — mesure de la
+     capacité à interrompre une commande. Mesure proposée, à valider en usage.`;
+}
+
+function card(hostId, items){
+  $(hostId).innerHTML = items.map(([k,v,s,cls]) =>
+    `<div class="stat ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div>` +
+    (s ? `<div class="s">${s}</div>` : '') + `</div>`).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NAVIGATION ENTRE ÉCRANS
+   ══════════════════════════════════════════════════════════════════ */
+function show(name){
+  for (const id of ['menu','game','results']) $(id).classList.toggle('hidden', id !== name);
+  if (name === 'game') fitCanvas();
+  if (name === 'menu') { state = { phase:'menu' }; syncMenu(); }
+}
+
+function syncMenu(){
+  const manual = document.querySelector('input[name=mode]:checked').value === 'manuel';
+  $('f-vend').style.display = manual ? 'none' : '';
+  $('l-vstart').textContent = manual ? 'Vitesse maximale d’avance' : 'Vitesse de défilement au début';
+  $('l-freq').textContent   = manual ? 'obstacles / seconde à vitesse maximale' : 'obstacles / seconde';
+}
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', syncMenu));
+
+$('btnStart').onclick = startGame;
+$('btnAgain').onclick = startGame;
+$('btnMenu').onclick  = () => show('menu');
+$('btnFs').onclick    = () => document.fullscreenElement
+  ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+
+/* ══════════════════════════════════════════════════════════════════
+   DIAGNOSTIC JOYSTICK (tourne tant qu'on n'est pas en jeu)
+   ══════════════════════════════════════════════════════════════════ */
+let padPrev = [], fpsSamples = [];
+function diagLoop(ts){
+  if (state.phase !== 'run'){
+    // mesure locale : ne dit rien de la latence ajoutée par un bureau à distance
+    if (ts) fpsSamples.push(ts);            // le tout premier appel n'a pas d'horodatage
+    if (fpsSamples.length > 40) fpsSamples.shift();
+    if (fpsSamples.length > 10){
+      const span = fpsSamples[fpsSamples.length-1] - fpsSamples[0];
+      $('fps').textContent = Math.round((fpsSamples.length-1) * 1000 / span);
+    }
+
+    const pad = firstPad();
+    const dz  = clamp(+$('deadzone').value, 0, 60) / 100;
+    $('padName').textContent = pad ? pad.id : 'Aucune manette détectée';
+    $('padName').classList.toggle('off', !pad);
+
+    const ax = pad ? (pad.axes[0]||0) : 0, ay = pad ? (pad.axes[1]||0) : 0;
+    setBar('barX','valX', ax, dz); setBar('barY','valY', ay, dz);
+
+    // bouton A ou Start pour démarrer depuis le menu (front montant)
+    if (pad && state.phase === 'menu'){
+      const now = pad.buttons.map(b => b.pressed);
+      if ((now[0] && !padPrev[0]) || (now[9] && !padPrev[9])) startGame();
+      padPrev = now;
+    }
+    if (state.phase === 'menu' && (keys.Enter || keys.NumpadEnter)) { keys.Enter = keys.NumpadEnter = false; startGame(); }
+  }
+  requestAnimationFrame(diagLoop);
+}
+function setBar(barId, valId, v, dz){
+  const bar = $(barId), pct = Math.min(Math.abs(v), 1) * 50;
+  bar.style.left  = (v < 0 ? 50 - pct : 50) + '%';
+  bar.style.width = pct + '%';
+  bar.style.background = Math.abs(v) > dz ? '#4cc9f0' : '#4a5a6b';
+  $(valId).textContent = v.toFixed(2);
+}
+
+syncMenu(); fitCanvas(); diagLoop();
+</script>
+</body>
+</html>
