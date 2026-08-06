@@ -46,7 +46,10 @@
     background:var(--panel-2); color:var(--txt); border:1px solid var(--line);
     border-radius:8px; padding:11px 12px; font-size:17px; font-family:inherit; width:100%;
   }
-  input[type=number]:focus,select:focus{outline:2px solid var(--accent-2); outline-offset:1px}
+  input[type=number]:focus,select:focus,input[type=range]:focus{outline:2px solid var(--accent-2); outline-offset:1px}
+  label.field.wide{grid-column:1 / -1}
+  input[type=range]{width:100%; height:30px; accent-color:var(--accent); background:transparent; cursor:pointer}
+  label.field span b{color:var(--accent); font-variant-numeric:tabular-nums}
 
   .modes{display:flex; gap:12px; flex-wrap:wrap}
   .modes label{
@@ -75,6 +78,11 @@
   .bar i{position:absolute; top:0; bottom:0; left:50%; background:var(--accent-2); display:block}
   .bar u{position:absolute; top:0; bottom:0; left:50%; width:1px; background:#4a5a6b}
   .val{font-variant-numeric:tabular-nums; color:var(--txt-dim); min-width:56px; text-align:right}
+  .diagrows{display:grid; grid-template-columns:1fr auto; gap:7px 16px; margin-top:14px;
+            padding-top:14px; border-top:1px solid var(--line); font-size:14px; color:var(--txt-dim)}
+  .diagrows b{color:var(--txt); font-variant-numeric:tabular-nums; text-align:right}
+  .diagrows b.ok{color:var(--accent)}
+  .diagrows b.ko{color:#f4a261}
   .hint{font-size:13px; color:var(--txt-dim); margin-top:12px; line-height:1.45}
 
   /* ---------- Jeu ---------- */
@@ -141,8 +149,8 @@
       </label>
       <label class="field">
         <span>Durée de l'exercice</span>
-        <input type="number" id="duration" value="90" min="10" max="900" step="5">
-        <em>secondes</em>
+        <input type="number" id="duration" value="1.5" min="0.5" max="20" step="0.5">
+        <em id="l-duration">minutes — soit 1 min 30 s</em>
       </label>
       <label class="field">
         <span>Vitesse de déplacement latéral</span>
@@ -154,6 +162,12 @@
         <input type="number" id="deadzone" value="15" min="0" max="60" step="1">
         <em>% — au-delà duquel une action est comptée</em>
       </label>
+      <label class="field wide">
+        <span>Largeur de la zone de jeu — <b id="l-corridor">696 px</b></span>
+        <input type="range" id="corridor" value="696" min="380" max="1100" step="4">
+        <em>Zone de déplacement et d'apparition des obstacles. Plus elle est large,
+            plus les écarts à faire sont grands.</em>
+      </label>
     </div>
 
     <h2>Joystick — diagnostic</h2>
@@ -163,8 +177,12 @@
         <span>Axe X</span><div class="bar"><u></u><i id="barX"></i></div><span class="val" id="valX">0.00</span>
         <span>Axe Y</span><div class="bar"><u></u><i id="barY"></i></div><span class="val" id="valY">0.00</span>
       </div>
-      <div style="margin-top:12px;font-size:14px;color:var(--txt-dim)">
-        Fluidité mesurée sur ce PC : <b id="fps" style="color:var(--txt)">—</b> images/s
+      <div class="diagrows">
+        <span>API Gamepad disponible</span><b id="dApi">—</b>
+        <span>Emplacements renvoyés par le navigateur</span><b id="dSlots">—</b>
+        <span>Événement de connexion reçu</span><b id="dEvent">—</b>
+        <span>La page a le focus clavier</span><b id="dFocus">—</b>
+        <span>Fluidité mesurée sur ce PC</span><b id="fps">—</b>
       </div>
       <p class="hint">
         <b>Appuie sur un bouton du joystick</b> pour que le navigateur l'active (sécurité Chrome/Edge : une manette
@@ -217,13 +235,21 @@
    ne dépend pas de la taille de l'écran)
    ══════════════════════════════════════════════════════════════════ */
 const W = 1200, H = 900;              // résolution logique du canvas
+const FIELD_H     = 800;              // hauteur du terrain ; le reste est le bandeau
 const WALL_W      = 44;               // épaisseur des murs
-const CORRIDOR_X  = 252;              // bord intérieur du mur gauche
-const CORRIDOR_W  = 696;              // largeur du couloir
-const CORRIDOR_R  = CORRIDOR_X + CORRIDOR_W;
 const PLAYER_W    = 74, PLAYER_H = 88;
-const PLAYER_Y    = 742;              // ordonnée du haut du personnage
+const PLAYER_Y    = FIELD_H - PLAYER_H - 22;   // ordonnée du haut du personnage
 const OBST_SIZE   = 96;
+/* Le couloir est réglable : recalculé à chaque partie, toujours centré.
+   Le bandeau d'information est en bas, pour que la zone de jeu puisse
+   occuper toute la largeur sans rien recouvrir. */
+const CORRIDOR_MIN = 380, CORRIDOR_MAX = W - 2*WALL_W - 12;
+let CORRIDOR_X, CORRIDOR_W, CORRIDOR_R;
+function poserCouloir(largeur){
+  CORRIDOR_W = clamp(Math.round(largeur), CORRIDOR_MIN, CORRIDOR_MAX);
+  CORRIDOR_X = Math.round((W - CORRIDOR_W) / 2);
+  CORRIDOR_R = CORRIDOR_X + CORRIDOR_W;
+}
 const THREAT_RATIO  = 0.75;           // part d'obstacles placés sur la trajectoire
 const MIN_SPAWN_GAP = OBST_SIZE * 1.7;// écart vertical minimal entre 2 obstacles
 /* Temps de réaction : variation de commande, dans le sens de l'esquive, considérée
@@ -248,8 +274,11 @@ const lerp  = (a,b,t) => a + (b-a)*t;
    ══════════════════════════════════════════════════════════════════ */
 const keys = Object.create(null);
 addEventListener('keydown', e => {
+  if (state.phase === 'run' && !e.repeat){
+    if (e.code === 'Escape') endGame('interrompu');
+    if (e.code === 'Space' || e.code === 'KeyP') togglePause();
+  }
   keys[e.code] = true;
-  if (e.code === 'Escape' && state.phase === 'run') endGame('interrompu');
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
@@ -306,7 +335,9 @@ function buildConfig(){
     vStart:    +$('vStart').value,
     vEnd:      +$('vEnd').value,
     freq:      +$('freq').value,
-    duration:  +$('duration').value,
+    minutes:   +$('duration').value,
+    duration:  +$('duration').value * 60,       // interne : toujours en secondes
+    corridor:  +$('corridor').value,
     lateral:   +$('lateral').value,
     deadzone:  clamp(+$('deadzone').value, 0, 60) / 100,
   };
@@ -314,12 +345,20 @@ function buildConfig(){
 
 function startGame(){
   cfg = buildConfig();
+  poserCouloir(cfg.corridor);
   state = {
     phase:'run',
     t0: performance.now(),
     last: performance.now(),
-    elapsed: 0,             // temps de jeu écoulé (décompte exclu)
+    elapsed: 0,             // temps de jeu écoulé (décompte et pauses exclus)
+    clock: 0,               // horloge de jeu en ms : ne tourne pas pendant la pause,
+                            // sinon toute mesure de réaction serait faussée par une pause
     countdown: COUNTDOWN,
+    paused: false,
+    pauseCount: 0,
+    pausedMs: 0,            // temps total passé en pause
+    pauseStart: 0,
+    padStartPrev: true,     // le bouton qui a lancé la partie est peut-être encore enfoncé
     playerX: CORRIDOR_X + CORRIDOR_W/2,   // centre du personnage
     scrollY: 0,             // décor parcouru, en px
     speed: 0,
@@ -348,12 +387,30 @@ function startGame(){
 /* ══════════════════════════════════════════════════════════════════
    BOUCLE DE JEU
    ══════════════════════════════════════════════════════════════════ */
+/** Bascule la pause. L'horloge de jeu s'arrête avec elle : les temps de
+ *  réaction en cours de mesure ne prennent donc pas la pause dans leur délai. */
+function togglePause(){
+  const s = state;
+  if (s.phase !== 'run' || s.countdown > 0) return;
+  s.paused = !s.paused;
+  if (s.paused){ s.pauseCount++; s.pauseStart = performance.now(); }
+  else { s.pausedMs += performance.now() - s.pauseStart; s.last = performance.now(); }
+}
+
 function loop(now){
   if (state.phase !== 'run') return;
   const dt = Math.min((now - state.last)/1000, 0.05);
   state.last = now;
 
   const inp = readInput(cfg.deadzone);
+
+  /* bouton Start de la manette : bascule la pause, sur front montant */
+  const pad = firstPad();
+  const startNow = !!(pad && pad.buttons[9] && pad.buttons[9].pressed);
+  if (startNow && !state.padStartPrev) togglePause();
+  state.padStartPrev = startNow;
+
+  if (state.paused) { draw(inp); return requestAnimationFrame(loop); }
 
   if (state.countdown > 0){
     state.countdown -= dt;
@@ -362,15 +419,17 @@ function loop(now){
   }
 
   state.elapsed += dt;
-  update(dt, inp, now);
+  update(dt, inp);
   draw(inp);
 
   if (state.elapsed >= cfg.duration) return endGame('terminé');
   requestAnimationFrame(loop);
 }
 
-function update(dt, inp, now){
+function update(dt, inp){
   const s = state;
+  s.clock += dt * 1000;
+  const now = s.clock;              // toutes les mesures sont datées sur l'horloge de jeu
 
   /* — vitesse de défilement — */
   if (cfg.mode === 'auto'){
@@ -435,7 +494,7 @@ function update(dt, inp, now){
       resolveObstacle(o, now);
     }
   }
-  s.obstacles = s.obstacles.filter(o => o.y < H + OBST_SIZE);
+  s.obstacles = s.obstacles.filter(o => o.y < FIELD_H);   // le bandeau n'est pas du terrain
   if (s.flash > 0) s.flash = Math.max(0, s.flash - dt);
 }
 
@@ -532,14 +591,17 @@ function draw(inp){
   const shake = s.flash > 0 ? (Math.random()-0.5) * s.flash * 22 : 0;
   ctx.save(); ctx.translate(shake, 0);
 
-  /* fond extérieur */
-  ctx.fillStyle = '#12161d'; ctx.fillRect(-40, 0, W+80, H);
+  /* ---- terrain, détouré pour ne jamais déborder sur le bandeau ---- */
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-40, 0, W+80, FIELD_H); ctx.clip();
+
+  ctx.fillStyle = '#12161d'; ctx.fillRect(-40, 0, W+80, FIELD_H);
 
   /* sol du couloir + bandes défilantes */
-  ctx.fillStyle = '#e9ecf1'; ctx.fillRect(CORRIDOR_X, 0, CORRIDOR_W, H);
+  ctx.fillStyle = '#e9ecf1'; ctx.fillRect(CORRIDOR_X, 0, CORRIDOR_W, FIELD_H);
   const offSol = s.scrollY % FLOOR_PERIOD;
   ctx.fillStyle = '#d3d9e3';
-  for (let y = offSol - FLOOR_PERIOD; y < H; y += FLOOR_PERIOD)
+  for (let y = offSol - FLOOR_PERIOD; y < FIELD_H; y += FLOOR_PERIOD)
     ctx.fillRect(CORRIDOR_X, y, CORRIDOR_W, 14);
 
   /* murs gauche et droit — décalage propre à leur période, sinon le motif saute */
@@ -558,23 +620,26 @@ function draw(inp){
   }
 
   drawPlayer(s.playerX, PLAYER_Y);
-  drawHud(inp);
 
   if (s.flash > 0){
     ctx.fillStyle = `rgba(230,57,70,${s.flash * 0.5})`;
-    ctx.fillRect(-40, 0, W+80, H);
+    ctx.fillRect(-40, 0, W+80, FIELD_H);
   }
-  if (s.countdown > 0) drawCountdown();
+  ctx.restore();
+
+  drawHud(inp);
+  if (s.countdown > 0)   drawCountdown();
+  else if (s.paused)     drawPause();
   ctx.restore();
 }
 
 function drawWall(x, off, dir){
-  ctx.fillStyle = '#333c4d'; ctx.fillRect(x, 0, WALL_W, H);
+  ctx.fillStyle = '#333c4d'; ctx.fillRect(x, 0, WALL_W, FIELD_H);
   ctx.fillStyle = '#8892a5';
-  for (let y = off - WALL_PERIOD; y < H; y += WALL_PERIOD)
+  for (let y = off - WALL_PERIOD; y < FIELD_H; y += WALL_PERIOD)
     ctx.fillRect(x + 10, y, WALL_W - 20, 5);
   ctx.fillStyle = '#f4a261';                    // liseré intérieur, haute visibilité
-  ctx.fillRect(dir > 0 ? x + WALL_W - 7 : x, 0, 7, H);
+  ctx.fillRect(dir > 0 ? x + WALL_W - 7 : x, 0, 7, FIELD_H);
 }
 
 function drawPlayer(cx, top){
@@ -592,37 +657,64 @@ function drawPlayer(cx, top){
   ctx.beginPath(); ctx.arc(cx, top + PLAYER_H*0.30, 9, 0, Math.PI*2); ctx.fill();
 }
 
+/** Bandeau bas : laisse toute la largeur au terrain, quelle que soit la
+ *  largeur de couloir choisie. */
 function drawHud(inp){
-  const s = state;
-  ctx.textBaseline = 'top';
+  const s = state, top = FIELD_H, mid = top + (H - top)/2;
+
+  ctx.fillStyle = '#161c25'; ctx.fillRect(-40, top, W+80, H - top);
+  ctx.fillStyle = '#2c3644'; ctx.fillRect(-40, top, W+80, 3);
+  ctx.textBaseline = 'middle';
+
+  /* compteurs, à gauche */
+  ctx.textAlign = 'left';
+  ctx.font = '700 40px "Segoe UI",sans-serif';
+  ctx.fillStyle = '#06d6a0'; ctx.fillText(s.avoided, 40, mid);
+  ctx.fillStyle = '#e63946'; ctx.fillText(s.hit,    150, mid);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 13px "Segoe UI",sans-serif';
+  ctx.fillText('ÉVITÉS', 40, mid + 30); ctx.fillText('TOUCHÉS', 150, mid + 30);
+
+  /* amplitude de commande : jauge bidirectionnelle, centrée sous le personnage */
+  const bw = 320, bh = 26, bx = W/2 - bw/2, by = mid - bh/2;
+  ctx.fillStyle = '#0e141b'; roundRect(bx, by, bw, bh, 13); ctx.fill();
+  const amp = clamp(inp.x, -1, 1) * (bw/2 - 3);
+  ctx.fillStyle = '#4cc9f0';
+  if (amp >= 0) ctx.fillRect(W/2, by + 3, amp, bh - 6);
+  else          ctx.fillRect(W/2 + amp, by + 3, -amp, bh - 6);
+  ctx.fillStyle = '#3a4757'; ctx.fillRect(W/2 - 1, by + 2, 2, bh - 4);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = inp.source === 'pad' ? '#06d6a0' : inp.source === 'key' ? '#f4a261' : '#54627a';
+  ctx.font = '600 13px "Segoe UI",sans-serif';
+  ctx.fillText(inp.source === 'pad' ? 'MANETTE' : inp.source === 'key' ? 'CLAVIER' : 'NEUTRE',
+               W/2, by + bh + 16);
 
   /* chrono, à droite */
-  const left = Math.max(0, cfg.duration - s.elapsed);
-  ctx.fillStyle = '#e9eef4'; ctx.font = '700 62px "Segoe UI",sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(Math.ceil(left), W - 105, 34);
-  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 16px "Segoe UI",sans-serif';
-  ctx.fillText('SECONDES', W - 105, 108);
+  const reste = Math.max(0, Math.ceil(cfg.duration - s.elapsed));
+  const txt = cfg.duration >= 60
+    ? Math.floor(reste/60) + ':' + String(reste % 60).padStart(2,'0')
+    : String(reste);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#e9eef4'; ctx.font = '700 52px "Segoe UI",sans-serif';
+  ctx.fillText(txt, W - 40, mid - 4);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 13px "Segoe UI",sans-serif';
+  ctx.fillText(cfg.duration >= 60 ? 'RESTANT' : 'SECONDES', W - 40, mid + 30);
 
-  ctx.font = '700 34px "Segoe UI",sans-serif';
-  ctx.fillStyle = '#06d6a0'; ctx.fillText(s.avoided, W - 150, 168);
-  ctx.fillStyle = '#e63946'; ctx.fillText(s.hit,     W - 60,  168);
-  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 14px "Segoe UI",sans-serif';
-  ctx.fillText('ÉVITÉS', W - 150, 210); ctx.fillText('TOUCHÉS', W - 60, 210);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#54627a';
+  ctx.font = '500 13px "Segoe UI",sans-serif';
+  ctx.fillText('Espace ou Start : pause    ·    Échap : arrêter', W/2, top + 22);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+}
 
-  /* amplitude de commande, à gauche : retour visuel direct sur le geste */
-  const bx = 60, by = 300, bw = 92, bh = 300;
-  ctx.fillStyle = '#1c232d'; roundRect(bx, by, bw, bh, 10); ctx.fill();
-  ctx.fillStyle = '#4cc9f0';
-  const amp = Math.min(Math.abs(inp.x), 1) * bh;
-  ctx.fillRect(bx + 6, by + bh - amp, bw - 12, amp);
-  ctx.fillStyle = '#7f8ea0'; ctx.font = '600 14px "Segoe UI",sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('AMPLITUDE', bx + bw/2, by + bh + 12);
-  ctx.fillStyle = inp.source === 'pad' ? '#06d6a0' : inp.source === 'key' ? '#f4a261' : '#54627a';
-  ctx.fillText(inp.source === 'pad' ? 'JOYSTICK' : inp.source === 'key' ? 'CLAVIER' : 'NEUTRE', bx + bw/2, by - 30);
-
-  ctx.fillStyle = '#54627a'; ctx.font = '500 15px "Segoe UI",sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('Échap : arrêter', 26, H - 46);
-  ctx.textAlign = 'left';
+function drawPause(){
+  ctx.fillStyle = 'rgba(10,14,20,.80)'; ctx.fillRect(-40, 0, W+80, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#4cc9f0'; ctx.font = '700 110px "Segoe UI",sans-serif';
+  ctx.fillText('PAUSE', W/2, FIELD_H/2 - 40);
+  ctx.fillStyle = '#e9eef4'; ctx.font = '600 30px "Segoe UI",sans-serif';
+  ctx.fillText('Espace ou bouton Start pour reprendre', W/2, FIELD_H/2 + 60);
+  ctx.fillStyle = '#7f8ea0'; ctx.font = '500 21px "Segoe UI",sans-serif';
+  ctx.fillText('Le chronomètre et les mesures sont suspendus', W/2, FIELD_H/2 + 110);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
 }
 
 function drawCountdown(){
@@ -630,11 +722,11 @@ function drawCountdown(){
   const n = Math.ceil(state.countdown);
   ctx.fillStyle = '#06d6a0'; ctx.font = '700 200px "Segoe UI",sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(n, W/2, H/2);
+  ctx.fillText(n, W/2, FIELD_H/2);
   ctx.fillStyle = '#e9eef4'; ctx.font = '600 30px "Segoe UI",sans-serif';
   ctx.fillText(cfg.mode === 'auto' ? 'Évite les carrés rouges — gauche / droite'
-                                   : 'Pousse vers l’avant pour avancer', W/2, H/2 + 150);
-  ctx.textBaseline = 'top';
+                                   : 'Pousse vers l’avant pour avancer', W/2, FIELD_H/2 + 150);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -656,7 +748,7 @@ function renderResults(){
 
   $('resSub').textContent =
     `${cfg.mode === 'auto' ? 'Défilement automatique' : 'Déplacement manuel'} · ` +
-    `${s.elapsed.toFixed(1).replace('.',',')} s · ` +
+    `${fmtDuree(s.elapsed)} de jeu · ` +
     (s.endReason === 'interrompu' ? 'arrêtée avant la fin' : 'menée à son terme');
 
   card('statObst', [
@@ -679,8 +771,11 @@ function renderResults(){
 
   const rows = [
     ['Mode de déplacement', cfg.mode === 'auto' ? 'Défilement automatique' : 'Déplacement manuel'],
-    ['Durée demandée', cfg.duration + ' s'],
-    ['Durée réelle', s.elapsed.toFixed(1).replace('.',',') + ' s'],
+    ['Durée demandée', fmtDuree(cfg.duration)],
+    ['Temps de jeu effectif', fmtDuree(s.elapsed)],
+    ['Pauses', s.pauseCount
+        ? `${s.pauseCount} — ${fmtDuree(s.pausedMs/1000)} au total`
+        : 'aucune'],
   ];
   if (cfg.mode === 'auto'){
     rows.push(['Vitesse au début', cfg.vStart + ' px/s'],
@@ -691,6 +786,7 @@ function renderResults(){
               ['Distance parcourue', Math.round(s.scrollY) + ' px']);
   }
   rows.push(['Fréquence des obstacles', String(cfg.freq).replace('.',',') + ' /s'],
+            ['Largeur de la zone de jeu', CORRIDOR_W + ' px'],
             ['Vitesse latérale',        cfg.lateral + ' px/s'],
             ['Zone morte du joystick',  Math.round(cfg.deadzone*100) + ' %'],
             ['Fin de partie', s.endReason === 'interrompu' ? 'Interrompue (Échap)' : 'Durée atteinte']);
@@ -720,13 +816,24 @@ function show(name){
   if (name === 'menu') { state = { phase:'menu' }; syncMenu(); }
 }
 
+/** Durée lisible : « 2 min 30 s », « 45 s ». */
+function fmtDuree(sec){
+  const t = Math.round(sec), m = Math.floor(t/60), r = t % 60;
+  if (!m) return r + ' s';
+  return r ? `${m} min ${String(r).padStart(2,'0')} s` : `${m} min`;
+}
+
 function syncMenu(){
   const manual = document.querySelector('input[name=mode]:checked').value === 'manuel';
   $('f-vend').style.display = manual ? 'none' : '';
   $('l-vstart').textContent = manual ? 'Vitesse maximale d’avance' : 'Vitesse de défilement au début';
   $('l-freq').textContent   = manual ? 'obstacles / seconde à vitesse maximale' : 'obstacles / seconde';
+  $('l-duration').textContent = 'minutes — soit ' + fmtDuree(+$('duration').value * 60);
+  $('l-corridor').textContent = $('corridor').value + ' px';
 }
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', syncMenu));
+$('corridor').addEventListener('input', syncMenu);
+$('duration').addEventListener('input', syncMenu);
 
 $('btnStart').onclick = startGame;
 $('btnAgain').onclick = startGame;
@@ -737,7 +844,13 @@ $('btnFs').onclick    = () => document.fullscreenElement
 /* ══════════════════════════════════════════════════════════════════
    DIAGNOSTIC JOYSTICK (tourne tant qu'on n'est pas en jeu)
    ══════════════════════════════════════════════════════════════════ */
-let padPrev = [], fpsSamples = [];
+let padPrev = [], fpsSamples = [], gpEventVu = false;
+addEventListener('gamepadconnected', () => { gpEventVu = true; });
+
+function ligne(id, txt, ok){
+  const el = $(id); el.textContent = txt; el.className = ok ? 'ok' : 'ko';
+}
+
 function diagLoop(ts){
   if (state.phase !== 'run'){
     // mesure locale : ne dit rien de la latence ajoutée par un bureau à distance
@@ -745,8 +858,19 @@ function diagLoop(ts){
     if (fpsSamples.length > 40) fpsSamples.shift();
     if (fpsSamples.length > 10){
       const span = fpsSamples[fpsSamples.length-1] - fpsSamples[0];
-      $('fps').textContent = Math.round((fpsSamples.length-1) * 1000 / span);
+      $('fps').textContent = Math.round((fpsSamples.length-1) * 1000 / span) + ' images/s';
     }
+
+    /* Chromium renvoie 4 emplacements même sans manette branchée : « 4 vides »
+       signifie que l'API fonctionne et que rien ne lui parvient, ce qui n'est
+       pas du tout le même diagnostic qu'une API neutralisée (0 emplacement). */
+    const api = typeof navigator.getGamepads === 'function';
+    const brut = api ? navigator.getGamepads() : [];
+    const occ  = [...brut].filter(Boolean).length;
+    ligne('dApi',   api ? 'oui' : 'NON — bloquée par le navigateur', api);
+    ligne('dSlots', api ? `${brut.length} · ${occ} occupé${occ > 1 ? 's' : ''}` : '—', occ > 0);
+    ligne('dEvent', gpEventVu ? 'oui' : 'jamais reçu', gpEventVu);
+    ligne('dFocus', document.hasFocus() ? 'oui' : 'NON — clique dans la page', document.hasFocus());
 
     const pad = firstPad();
     const dz  = clamp(+$('deadzone').value, 0, 60) / 100;
@@ -774,7 +898,7 @@ function setBar(barId, valId, v, dz){
   $(valId).textContent = v.toFixed(2);
 }
 
-syncMenu(); fitCanvas(); diagLoop();
+poserCouloir(+$('corridor').value); syncMenu(); fitCanvas(); diagLoop();
 </script>
 </body>
 </html>
