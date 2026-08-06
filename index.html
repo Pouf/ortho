@@ -48,6 +48,14 @@
   }
   input[type=number]:focus,select:focus,input[type=range]:focus{outline:2px solid var(--accent-2); outline-offset:1px}
   label.field.wide{grid-column:1 / -1}
+  label.check{display:flex; gap:12px; align-items:flex-start; cursor:pointer;
+              background:var(--panel-2); border:2px solid var(--line); border-radius:10px;
+              padding:14px 16px; margin-bottom:14px}
+  label.check:has(input:checked){border-color:var(--accent); background:#16302c}
+  label.check input{margin-top:2px; width:19px; height:19px; accent-color:var(--accent); flex:none}
+  label.check span{font-weight:600}
+  label.check em{display:block; font-style:normal; font-weight:400; font-size:13px;
+                 color:var(--txt-dim); margin-top:3px}
   input[type=range]{width:100%; height:30px; accent-color:var(--accent); background:transparent; cursor:pointer}
   label.field span b{color:var(--accent); font-variant-numeric:tabular-nums}
 
@@ -186,6 +194,30 @@
       </label>
     </div>
 
+    <h2 id="hStopOpt">Ordres « STOP »</h2>
+    <label class="check" id="stopCheck">
+      <input type="checkbox" id="stopEnabled">
+      <span>Ajouter des ordres STOP imprévisibles<em>Un grand STOP s'affiche par surprise ; il faut ramener
+        le joystick au neutre dans le délai imparti, et l'y maintenir.</em></span>
+    </label>
+    <div class="grid" id="stopOpts">
+      <label class="field">
+        <span>Délai imparti</span>
+        <input type="number" id="stopDelay" value="800" min="200" max="5000" step="50">
+        <em>millisecondes pour atteindre le neutre</em>
+      </label>
+      <label class="field">
+        <span>Intervalle minimal</span>
+        <input type="number" id="stopMin" value="6" min="2" max="90" step="1">
+        <em>secondes entre deux ordres</em>
+      </label>
+      <label class="field">
+        <span>Intervalle maximal</span>
+        <input type="number" id="stopMax" value="14" min="3" max="120" step="1">
+        <em>tirage au hasard entre les deux bornes</em>
+      </label>
+    </div>
+
     <h2>Joystick — diagnostic</h2>
     <div id="diag">
       <div id="padName" class="off">Aucune manette détectée</div>
@@ -230,6 +262,9 @@
 
     <h2 id="hRt">Temps de réaction</h2>
     <div class="stats" id="statRt"></div>
+
+    <h2 id="hStop">Ordres STOP</h2>
+    <div class="stats" id="statStop"></div>
 
     <h2>Paramètres de la partie</h2>
     <table class="recap" id="tblInfo"></table>
@@ -347,8 +382,9 @@ let state = { phase:'menu' };
 let cfg   = null;
 
 function buildConfig(){
+  const mode = document.querySelector('input[name=mode]:checked').value;
   return {
-    mode:      document.querySelector('input[name=mode]:checked').value,
+    mode,
     vStart:    +$('vStart').value,
     vEnd:      +$('vEnd').value,
     freq:      +$('freq').value,
@@ -358,6 +394,10 @@ function buildConfig(){
     lateral:   +$('lateral').value,
     zoneDepth: +$('zoneDepth').value,
     dwell:     +$('dwell').value,
+    stopOn:    $('stopEnabled').checked && mode !== 'arret',   // sans objet en arrêt contrôlé
+    stopDelay: +$('stopDelay').value,
+    stopMin:   +$('stopMin').value,
+    stopMax:   Math.max(+$('stopMax').value, +$('stopMin').value),
     deadzone:  clamp(+$('deadzone').value, 0, 60) / 100,
   };
 }
@@ -395,6 +435,15 @@ function startGame(){
     /* mode « arrêt contrôlé » */
     stopPresented: 0, stopSuccess: 0, stopFail: 0,
     stopMargins: [],        // distance restante à l'obstacle lors d'un arrêt réussi (px)
+    approachSpeeds: [],     // vitesse moyenne sur le trajet précédant la zone (px/s)
+    entrySpeeds: [],        // vitesse à l'instant précis de l'entrée en zone (px/s)
+
+    /* option « ordres STOP » */
+    stopOrder: null,        // ordre en cours, ou null
+    stopTimer: 0,           // secondes avant le prochain ordre
+    stopGiven: 0, stopIntime: 0, stopLate: 0,
+    stopReactions: [],      // délai ordre → neutre atteint (ms)
+    stopOvershoot: [],      // dépassement du délai imparti, sur les échecs (ms)
     zoneReleases: [],       // délai entre l'entrée en zone et le retour au neutre (ms)
     blockedReleases: [],    // délai entre le blocage et le retour au neutre (ms)
     crashSpeeds: [],        // vitesse au moment du dépassement (px/s)
@@ -408,6 +457,7 @@ function startGame(){
   };
   // la première barrière existe dès le décompte, sinon elle surgirait au top départ
   if (cfg.mode === 'arret') spawnBarriere(0);
+  if (cfg.stopOn) state.stopTimer = tirageIntervalleStop();
   show('game');
   requestAnimationFrame(loop);
 }
@@ -459,10 +509,15 @@ function update(dt, inp){
   s.clock += dt * 1000;
   const now = s.clock;              // toutes les mesures sont datées sur l'horloge de jeu
   if (cfg.mode === 'arret') return updateArret(dt, inp, now);
+  if (cfg.stopOn) updateStopOrders(dt, inp, now);
 
   /* — vitesse de défilement — */
   if (cfg.mode === 'auto'){
     s.speed = lerp(cfg.vStart, cfg.vEnd, clamp(s.elapsed / cfg.duration, 0, 1));
+    // en auto, le défilement n'est pas commandé au joystick : on le fige pendant
+    // l'ordre, sinon un obstacle arriverait au moment précis où la consigne est
+    // de lâcher le stick
+    if (s.stopOrder) s.speed = 0;
   } else {
     s.speed = clamp(-inp.y, 0, 1) * cfg.vStart;   // pousser vers l'avant = avancer
   }
@@ -498,7 +553,7 @@ function update(dt, inp){
   else                     s.spawnAcc += (s.speed * dt) / (cfg.vStart / cfg.freq);
   s.spawnAcc = Math.min(s.spawnAcc, 1.5);   // évite une rafale après une attente
 
-  if (s.spawnAcc >= 1){
+  if (s.spawnAcc >= 1 && !s.stopOrder){   // rien de neuf pendant un ordre STOP
     const topMost = s.obstacles.reduce((m,o) => Math.min(m, o.y), Infinity);
     if (topMost > -OBST_SIZE + MIN_SPAWN_GAP || !isFinite(topMost)){
       s.spawnAcc -= 1;
@@ -541,10 +596,65 @@ function spawnBarriere(now){
     releaseMs: null,      // délai entrée en zone → premier retour au neutre
     crashed: false, crashT: 0, crashSpeed: 0,
     dansZone: false,
+    appDist: 0, appTime: 0,   // trajet parcouru avant la zone : vitesse d'approche
+    entrySpeed: null,         // vitesse instantanée à l'entrée dans la zone
   };
   state.obstacles = [o];
   state.stopPresented++;
   return o;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   OPTION « ORDRES STOP »  (se greffe sur les modes auto et manuel)
+   Un ordre surgit à intervalle aléatoire ; il faut ramener le joystick
+   au neutre dans le délai imparti, puis l'y maintenir.
+   ══════════════════════════════════════════════════════════════════ */
+const tirageIntervalleStop = () => cfg.stopMin + Math.random() * (cfg.stopMax - cfg.stopMin);
+
+function updateStopOrders(dt, inp, now){
+  const s = state;
+  const neutre = inp.x === 0 && inp.y === 0;
+
+  if (!s.stopOrder){
+    s.stopTimer -= dt;
+    // un ordre n'a de sens que si le joystick est effectivement tenu :
+    // au neutre, la consigne serait déjà satisfaite et la mesure vide
+    const tientLeStick = cfg.mode === 'auto' ? Math.abs(inp.x) > 0 : -inp.y > 0;
+    if (s.stopTimer <= 0 && tientLeStick && !neutre){
+      s.stopOrder = { t0: now, reached: null, stillMs: 0, late: false };
+      s.stopGiven++;
+    }
+    return;
+  }
+
+  const o = s.stopOrder, ecoule = now - o.t0;
+
+  if (o.reached === null){
+    if (neutre){
+      o.reached = ecoule;
+      s.stopReactions.push(ecoule);
+      if (o.late) s.stopOvershoot.push(ecoule - cfg.stopDelay);
+      else        s.stopIntime++;
+    } else if (ecoule > cfg.stopDelay){
+      o.late = true;                       // échec acté dès le dépassement du délai,
+      if (!o.flagged){ o.flagged = true; s.stopLate++; s.flash = 0.35; }
+    }                                      // mais l'ordre reste jusqu'au relâchement
+  } else {
+    if (neutre) o.stillMs += dt * 1000;
+    else        o.stillMs = 0;             // l'arrêt doit être tenu sans interruption
+    if (o.stillMs >= cfg.dwell * 1000){
+      s.stopOrder = null;
+      s.stopTimer = tirageIntervalleStop();
+    }
+  }
+}
+
+/** Clôt les mesures d'approche d'une barrière franchie ou heurtée.
+ *  La vitesse moyenne inclut les temps d'arrêt du trajet : une approche
+ *  hésitante ou volontairement lente s'y lit directement. */
+function cloreBarriere(o){
+  if (o.appTime > 0) state.approachSpeeds.push(o.appDist / o.appTime);
+  if (o.entrySpeed !== null) state.entrySpeeds.push(o.entrySpeed);
 }
 
 function updateArret(dt, inp, now){
@@ -560,13 +670,20 @@ function updateArret(dt, inp, now){
   o.y       += s.speed * dt;
 
   const d = PLAYER_Y - (o.y + BARRIER_H);       // distance du front à la barrière
+  if (d > cfg.zoneDepth){                       // phase d'approche, avant la zone
+    o.appDist += s.speed * dt; o.appTime += dt;
+  }
   o.dansZone = !o.crashed && d >= 0 && d <= cfg.zoneDepth;
-  if (o.dansZone && o.zoneEnter === null) o.zoneEnter = now;
+  if (o.dansZone && o.zoneEnter === null){
+    o.zoneEnter = now;
+    o.entrySpeed = s.speed;
+  }
 
   if (o.crashed){
     o.y = PLAYER_Y - BARRIER_H;                 // collé au personnage
     if (neutre){
       s.blockedReleases.push(now - o.crashT);
+      cloreBarriere(o);
       spawnBarriere(now);
     }
   } else if (d < 0){
@@ -581,6 +698,7 @@ function updateArret(dt, inp, now){
         s.stopSuccess++;
         s.stopMargins.push(d);
         s.zoneReleases.push(o.releaseMs);
+        cloreBarriere(o);
         spawnBarriere(now);
       }
     } else {
@@ -722,6 +840,7 @@ function draw(inp){
   ctx.restore();
 
   drawHud(inp);
+  if (s.stopOrder)       drawStopOrder();
   if (s.countdown > 0)   drawCountdown();
   else if (s.paused)     drawPause();
   ctx.restore();
@@ -849,6 +968,39 @@ function drawHud(inp){
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
 }
 
+/** Ordre STOP : panneau très contrasté au centre du terrain. Le compte à rebours
+ *  du délai imparti est visible, puis le panneau vire au sombre une fois dépassé. */
+function drawStopOrder(){
+  const o = state.stopOrder;
+  const restant = Math.max(0, cfg.stopDelay - (state.clock - o.t0));
+  const pw = 560, ph = 230, px = W/2 - pw/2, py = FIELD_H/2 - ph/2;
+
+  ctx.fillStyle = 'rgba(10,14,20,.55)'; ctx.fillRect(-40, 0, W+80, FIELD_H);
+  ctx.fillStyle = o.late ? '#7d1620' : '#e63946';
+  roundRect(px, py, pw, ph, 22); ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 8;
+  roundRect(px + 10, py + 10, pw - 20, ph - 20, 15); ctx.stroke();
+
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.font = '700 130px "Segoe UI",sans-serif';
+  ctx.fillText('STOP', W/2, py + 92);
+  ctx.font = '600 26px "Segoe UI",sans-serif';
+  ctx.fillText(o.reached === null ? 'Relâche complètement le joystick'
+                                  : 'Garde le neutre', W/2, py + 168);
+
+  /* jauge : délai imparti, puis progression de l'arrêt tenu */
+  const gx = px + 40, gw = pw - 80, gy = py + ph - 34;
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; roundRect(gx, gy, gw, 14, 7); ctx.fill();
+  if (o.reached === null){
+    ctx.fillStyle = o.late ? '#f4a261' : '#fff';
+    ctx.fillRect(gx, gy, gw * (restant / cfg.stopDelay), 14);
+  } else {
+    ctx.fillStyle = '#06d6a0';
+    ctx.fillRect(gx, gy, gw * Math.min(o.stillMs / (cfg.dwell * 1000), 1), 14);
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+}
+
 function drawPause(){
   ctx.fillStyle = 'rgba(10,14,20,.80)'; ctx.fillRect(-40, 0, W+80, H);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -897,6 +1049,7 @@ function renderResults(){
     `${NOM_MODE[cfg.mode]} · ${fmtDuree(s.elapsed)} de jeu · ` +
     (s.endReason === 'interrompu' ? 'arrêtée avant la fin' : 'menée à son terme');
 
+  renderStopCard();
   if (cfg.mode === 'arret') return renderResultsArret();
   $('hObst').textContent = 'Obstacles';
   $('hRt').textContent   = 'Temps de réaction';
@@ -935,6 +1088,9 @@ function renderResults(){
     rows.push(['Vitesse maximale d’avance', cfg.vStart + ' px/s'],
               ['Distance parcourue', Math.round(s.scrollY) + ' px']);
   }
+  if (cfg.stopOn)
+    rows.push(['Ordres STOP', `délai ${cfg.stopDelay} ms · arrêt tenu ${String(cfg.dwell).replace('.',',')} s`],
+              ['Intervalle entre ordres', `${cfg.stopMin} à ${cfg.stopMax} s, au hasard`]);
   rows.push(['Fréquence des obstacles', String(cfg.freq).replace('.',',') + ' /s'],
             ['Largeur de la zone de jeu', CORRIDOR_W + ' px'],
             ['Vitesse latérale',        cfg.lateral + ' px/s'],
@@ -951,6 +1107,28 @@ function renderResults(){
      capacité à interrompre une commande. Mesure proposée, à valider en usage.`;
 }
 
+/** Bloc « ordres STOP », affiché seulement si l'option était active. */
+function renderStopCard(){
+  const s = state, on = cfg.stopOn;
+  $('hStop').style.display = $('statStop').style.display = on ? '' : 'none';
+  if (!on){ $('statStop').innerHTML = ''; return; }   // pas de données périmées en réserve
+
+  const juges = s.stopIntime + s.stopLate;
+  const pendants = s.stopGiven - juges;      // ordre encore en cours quand la partie s'achève
+  card('statStop', [
+    ['Ordres donnés', s.stopGiven,
+     pendants > 0 ? `dont ${pendants} non tranché${pendants > 1 ? 's' : ''} à la fin` : '', 'info'],
+    ['Dans le délai', s.stopIntime, fmtPct(s.stopIntime, juges), 'good'],
+    ['Hors délai', s.stopLate, fmtPct(s.stopLate, juges), 'bad'],
+    ['Temps de relâchement', fmtMs(mean(s.stopReactions)),
+     `ordre → neutre · délai imparti ${cfg.stopDelay} ms`, 'info'],
+    ['Le plus lent', fmtMs(s.stopReactions.length ? Math.max(...s.stopReactions) : null), '', ''],
+    ['Dépassement moyen', fmtMs(mean(s.stopOvershoot)),
+     `sur ${s.stopOvershoot.length} ordre${s.stopOvershoot.length > 1 ? 's' : ''} hors délai`,
+     s.stopOvershoot.length ? 'bad' : ''],
+  ]);
+}
+
 /** Récapitulatif propre au mode « arrêt contrôlé » : ce ne sont plus des
  *  esquives mais des freinages, les indicateurs n'ont rien à voir. */
 function renderResultsArret(){
@@ -964,6 +1142,11 @@ function renderResultsArret(){
     ['Dépassements', s.stopFail, fmtPct(s.stopFail, tot), 'bad'],
     ['Marge d’arrêt moyenne', s.stopMargins.length ? Math.round(mean(s.stopMargins)) + ' px' : '—',
      'distance restante à la barrière', ''],
+    ['Vitesse d’approche moyenne',
+     s.approachSpeeds.length ? Math.round(mean(s.approachSpeeds)) + ' px/s' : '—',
+     s.entrySpeeds.length
+       ? `${Math.round(mean(s.entrySpeeds))} px/s à l’entrée en zone · plafond ${cfg.vStart}`
+       : `plafond ${cfg.vStart} px/s`, ''],
   ]);
 
   card('statRt', [
@@ -1030,11 +1213,15 @@ function syncMenu(){
   const manual = mode === 'manuel', arret = mode === 'arret';
   const show   = (id, on) => $(id).style.display = on ? '' : 'none';
 
+  const stopOn = $('stopEnabled').checked && !arret;
   show('f-vend',    !manual && !arret);
   show('f-freq',    !arret);          // en arrêt contrôlé, une barrière à la fois
   show('f-lateral', !arret);          // aucune commande latérale
   show('f-zone',     arret);
-  show('f-dwell',    arret);
+  show('f-dwell',    arret || stopOn);   // durée d'arrêt commune aux deux dispositifs
+  show('stopOpts',   stopOn);
+  show('hStopOpt',  !arret);          // l'option n'a pas de sens en arrêt contrôlé
+  show('stopCheck', !arret);
 
   $('l-vstart').textContent = (manual || arret) ? 'Vitesse maximale d’avance'
                                                 : 'Vitesse de défilement au début';
@@ -1050,6 +1237,7 @@ function syncMenu(){
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', syncMenu));
 $('corridor').addEventListener('input', syncMenu);
 $('duration').addEventListener('input', syncMenu);
+$('stopEnabled').addEventListener('change', syncMenu);
 
 $('btnStart').onclick = startGame;
 $('btnAgain').onclick = startGame;

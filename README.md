@@ -84,6 +84,32 @@ Mesures rendues : arrêts réussis et dépassements, **marge d'arrêt moyenne**
 relâchement** (entrée en zone → retour au neutre), délai de relâchement après un
 blocage, et vitesse moyenne au dépassement.
 
+## Option « ordres STOP »
+
+Cochable en défilement automatique et en déplacement manuel, cette option ajoute
+des ordres d'arrêt imprévisibles par-dessus l'exercice en cours. Un grand **STOP**
+surgit à intervalle tiré au hasard entre deux bornes réglables ; il faut ramener
+le joystick au neutre dans le délai imparti, puis l'y maintenir.
+
+Un ordre n'est donné que si le joystick est effectivement tenu à ce moment-là :
+au neutre, la consigne serait déjà satisfaite et la mesure vide de sens.
+
+Passé le délai, l'échec est signalé mais **l'ordre reste affiché jusqu'au
+relâchement effectif** — le geste est toujours mené à son terme, et le
+dépassement est mesuré.
+
+En défilement automatique, le décor se fige pendant toute la durée de l'ordre :
+le défilement n'y est pas commandé au joystick, et sans ce gel un obstacle
+pourrait arriver au moment précis où l'ordre demande de lâcher le stick. En
+déplacement manuel il n'y a pas de gel : c'est le relâchement lui-même qui
+arrête la progression.
+
+Réglages : **délai imparti** en millisecondes, **bornes de l'intervalle** entre
+deux ordres, et **durée d'arrêt à tenir** (réglage commun avec l'arrêt contrôlé).
+
+Mesures rendues : ordres donnés, arrêts dans le délai et hors délai, temps de
+relâchement moyen et maximal, dépassement moyen du délai sur les échecs.
+
 ## Récapitulatif de fin
 
 Affiché à la fin de la durée prévue ou dès l'arrêt anticipé :
