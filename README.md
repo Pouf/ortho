@@ -42,8 +42,8 @@ direct) et la fluidité mesurée en images par seconde.
 
 ## Réglages
 
-- **Mode** — défilement automatique (commandes gauche/droite seulement) ou
-  avance commandée (haut, gauche, droite et diagonales)
+- **Mode** — défilement automatique (commandes gauche/droite seulement), avance
+  commandée (haut, gauche, droite et diagonales), ou arrêt contrôlé (voir plus bas)
 - **Vitesse** — en mode automatique, vitesse de début et de fin, avec une rampe
   progressive entre les deux ; en mode manuel, vitesse maximale d'avance
 - **Durée**, en minutes
@@ -56,6 +56,33 @@ direct) et la fluidité mesurée en images par seconde.
 Le couloir ne peut jamais se boucher : une apparition qui ne laisserait pas un
 passage assez large est rejetée. Le parcours reste franchissable à toutes les
 fréquences.
+
+## Mode « arrêt contrôlé »
+
+Ce mode ne travaille pas l'esquive mais le freinage. Le couloir est étroit, la
+trajectoire rectiligne, et la commande latérale est ignorée : seule la poussée
+vers l'avant agit.
+
+Une barrière barre le couloir, précédée d'une **zone d'arrêt** matérialisée au
+sol. Il faut s'immobiliser dans cette zone en ramenant le joystick au neutre et
+en l'y maintenant le temps demandé — un relâchement fugace ne valide pas, le
+compteur repart de zéro. L'arrêt validé fait disparaître la barrière et la
+suivante se présente.
+
+En cas de dépassement, le personnage bute contre la barrière et **reste bloqué
+tant que le joystick n'est pas revenu au neutre**. La progression ne reprend
+qu'une fois la commande relâchée.
+
+Le rythme d'approche est libre : rien n'oblige à avancer vite, on peut sécuriser
+l'arrêt en s'approchant lentement.
+
+Réglages propres à ce mode : **profondeur de la zone d'arrêt** (plus elle est
+courte, plus le freinage doit être précis) et **durée d'arrêt à tenir**.
+
+Mesures rendues : arrêts réussis et dépassements, **marge d'arrêt moyenne**
+(distance restant à la barrière au moment de la validation), **temps de
+relâchement** (entrée en zone → retour au neutre), délai de relâchement après un
+blocage, et vitesse moyenne au dépassement.
 
 ## Récapitulatif de fin
 
