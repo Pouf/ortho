@@ -182,6 +182,14 @@
         <em>pixels / seconde à pleine amplitude — réactivité de la commande</em>
       </label>
       <label class="field">
+        <span>Stick utilisé</span>
+        <select id="stick">
+          <option value="gauche" selected>Stick gauche</option>
+          <option value="droit">Stick droit</option>
+        </select>
+        <em>Le stick droit permet de tenir la manette par-dessous et de commander au pouce</em>
+      </label>
+      <label class="field">
         <span>Zone morte du joystick</span>
         <input type="number" id="deadzone" value="15" min="0" max="60" step="1">
         <em>% — au-delà duquel une action est comptée</em>
@@ -222,13 +230,14 @@
     <div id="diag">
       <div id="padName" class="off">Aucune manette détectée</div>
       <div class="axes">
-        <span>Axe X</span><div class="bar"><u></u><i id="barX"></i></div><span class="val" id="valX">0.00</span>
-        <span>Axe Y</span><div class="bar"><u></u><i id="barY"></i></div><span class="val" id="valY">0.00</span>
+        <span id="lAxeX">Axe X</span><div class="bar"><u></u><i id="barX"></i></div><span class="val" id="valX">0.00</span>
+        <span id="lAxeY">Axe Y</span><div class="bar"><u></u><i id="barY"></i></div><span class="val" id="valY">0.00</span>
       </div>
       <div class="diagrows">
         <span>API Gamepad disponible</span><b id="dApi">—</b>
         <span>Emplacements renvoyés par le navigateur</span><b id="dSlots">—</b>
         <span>Événement de connexion reçu</span><b id="dEvent">—</b>
+        <span>Stick sélectionné</span><b id="dStick">—</b>
         <span>La page a le focus clavier</span><b id="dFocus">—</b>
         <span>Fluidité mesurée sur ce PC</span><b id="fps">—</b>
       </div>
@@ -335,6 +344,10 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
+/* Mapping standard : le stick gauche est sur les axes 0-1, le droit sur 2-3.
+   Choix laissé au réglage, selon le côté valide de la personne installée. */
+let AXE_BASE = 0;
+
 function firstPad(){
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   for (const p of pads) if (p && p.connected && p.axes.length >= 2) return p;
@@ -350,7 +363,7 @@ function readInput(dz){
   const pad = firstPad();
 
   if (pad){
-    let ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
+    let ax = pad.axes[AXE_BASE] || 0, ay = pad.axes[AXE_BASE + 1] || 0;
     const b = pad.buttons;                      // croix directionnelle, amplitude maximale
     if (b.length >= 16){
       if (b[12]?.pressed) ay = -1;
@@ -391,6 +404,7 @@ function buildConfig(){
     minutes:   +$('duration').value,
     duration:  +$('duration').value * 60,       // interne : toujours en secondes
     corridor:  +$('corridor').value,
+    stick:     $('stick').value,
     lateral:   +$('lateral').value,
     zoneDepth: +$('zoneDepth').value,
     dwell:     +$('dwell').value,
@@ -405,6 +419,7 @@ function buildConfig(){
 function startGame(){
   cfg = buildConfig();
   poserCouloir(cfg.corridor);
+  AXE_BASE = cfg.stick === 'droit' ? 2 : 0;
   state = {
     phase:'run',
     t0: performance.now(),
@@ -1094,6 +1109,7 @@ function renderResults(){
   rows.push(['Fréquence des obstacles', String(cfg.freq).replace('.',',') + ' /s'],
             ['Largeur de la zone de jeu', CORRIDOR_W + ' px'],
             ['Vitesse latérale',        cfg.lateral + ' px/s'],
+            ['Stick utilisé',           cfg.stick === 'droit' ? 'Droit' : 'Gauche'],
             ['Zone morte du joystick',  Math.round(cfg.deadzone*100) + ' %'],
             ['Fin de partie', s.endReason === 'interrompu' ? 'Interrompue (Échap)' : 'Durée atteinte']);
   $('tblInfo').innerHTML = rows.map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
@@ -1171,6 +1187,7 @@ function renderResultsArret(){
     ['Profondeur de la zone d’arrêt', cfg.zoneDepth + ' px'],
     ['Arrêt à tenir', String(cfg.dwell).replace('.',',') + ' s'],
     ['Largeur du couloir', CORRIDOR_W + ' px'],
+    ['Stick utilisé', cfg.stick === 'droit' ? 'Droit' : 'Gauche'],
     ['Zone morte du joystick', Math.round(cfg.deadzone*100) + ' %'],
     ['Fin de partie', s.endReason === 'interrompu' ? 'Interrompue (Échap)' : 'Durée atteinte'],
   ];
@@ -1231,6 +1248,11 @@ function syncMenu(){
   if (modePrec !== null && modePrec !== mode) $('corridor').value = arret ? 300 : 696;
   modePrec = mode;
 
+  const droit = $('stick').value === 'droit';
+  AXE_BASE = droit ? 2 : 0;
+  $('lAxeX').textContent = (droit ? 'Stick droit' : 'Stick gauche') + ' — X';
+  $('lAxeY').textContent = (droit ? 'Stick droit' : 'Stick gauche') + ' — Y';
+
   $('l-duration').textContent = 'minutes — soit ' + fmtDuree(+$('duration').value * 60);
   $('l-corridor').textContent = $('corridor').value + ' px';
 }
@@ -1238,6 +1260,7 @@ document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('c
 $('corridor').addEventListener('input', syncMenu);
 $('duration').addEventListener('input', syncMenu);
 $('stopEnabled').addEventListener('change', syncMenu);
+$('stick').addEventListener('change', syncMenu);
 
 $('btnStart').onclick = startGame;
 $('btnAgain').onclick = startGame;
@@ -1281,8 +1304,14 @@ function diagLoop(ts){
     $('padName').textContent = pad ? pad.id : 'Aucune manette détectée';
     $('padName').classList.toggle('off', !pad);
 
-    const ax = pad ? (pad.axes[0]||0) : 0, ay = pad ? (pad.axes[1]||0) : 0;
+    const ax = pad ? (pad.axes[AXE_BASE]   || 0) : 0;
+    const ay = pad ? (pad.axes[AXE_BASE+1] || 0) : 0;
     setBar('barX','valX', ax, dz); setBar('barY','valY', ay, dz);
+
+    // une manette sans second stick ne renverrait rien : autant le dire ici
+    const nom = AXE_BASE ? 'droit (axes 2-3)' : 'gauche (axes 0-1)';
+    const dispo = !pad || pad.axes.length >= AXE_BASE + 2;
+    ligne('dStick', dispo ? nom : nom + ' — ABSENT de cette manette', dispo);
 
     // bouton A ou Start pour démarrer depuis le menu (front montant)
     if (pad && state.phase === 'menu'){

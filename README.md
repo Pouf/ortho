@@ -34,6 +34,12 @@ Le déplacement est **proportionnel à l'amplitude** du stick : une inclinaison
 partielle donne un déplacement lent. Le clavier étant en tout-ou-rien, il
 commande toujours l'amplitude maximale.
 
+Le **stick employé se choisit dans les réglages**, gauche ou droit, dans tous
+les modes. Le stick droit permet de tenir la manette par-dessous d'une seule
+main et de commander au pouce, sans qu'un tiers ait à la maintenir. Le choix
+apparaît dans le récapitulatif, et le diagnostic signale une manette qui
+n'exposerait pas le stick demandé.
+
 L'écran d'accueil affiche un diagnostic de manette (nom, position des axes en
 direct) et la fluidité mesurée en images par seconde.
 
