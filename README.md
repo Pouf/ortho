@@ -139,4 +139,4 @@ la Gamepad API, avec zone morte radiale réétalée sur [0, 1] pour conserver
 toute la course utile du stick. Les éléments visuels sont dessinés par le code,
 sans image externe.
 
-État : prototype.
+État : alpha.
